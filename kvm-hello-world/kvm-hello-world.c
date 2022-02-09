@@ -203,7 +203,7 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 {
 	struct kvm_regs regs;
-	// uint32_t exit_count = 0;
+	uint32_t exit_count = 0;
 	uint64_t memval = 0;
 	struct kvm_translation kvm_trans;
 
@@ -212,7 +212,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 			perror("KVM_RUN");
 			exit(1);
 		}
-		// exit_count++;
+		exit_count++;
 
 		switch (vcpu->kvm_run->exit_reason) {
 		case KVM_EXIT_HLT:
@@ -224,28 +224,26 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 				char *p = (char *)vcpu->kvm_run;
 				uintptr_t mem;
 				memcpy(&mem, p + vcpu->kvm_run->io.data_offset, 1);
-				printf("got vm address %ld\n", mem);
+				// printf("got vm address %ld\n", mem);
 				kvm_trans.linear_address = mem;
 				if (ioctl(vcpu->fd, KVM_TRANSLATE, &kvm_trans) < 0) {
 					perror("KVM_TRANSLATE");
 					exit(1);
 				}
 				printf("got translate address %lld\n", kvm_trans.physical_address);
-				fwrite(&vm->mem[kvm_trans.physical_address], sizeof(char), 14, stdout);
+				size_t len = 0;
+				while (vm->mem[kvm_trans.physical_address+len] != 0) {
+					++len;
+				}
+				
+				fwrite(&vm->mem[kvm_trans.physical_address], sizeof(char), len, stdout);
 				fflush(stdout);
 				continue;
 			}
 			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN
 			    && vcpu->kvm_run->io.port == 0xEB) {
-						uint32_t exit_count = 1;
 					char *p = (char *)vcpu->kvm_run;
-					unsigned char bytes[4];
-
-					bytes[0] = (exit_count >> 24) & 0xFF;
-					bytes[1] = (exit_count >> 16) & 0xFF;
-					bytes[2] = (exit_count >> 8) & 0xFF;
-					bytes[3] = exit_count & 0xFF;
-					memcpy(p + vcpu->kvm_run->io.data_offset, bytes, 4);
+					p[vcpu->kvm_run->io.data_offset] = exit_count;
 					continue;
 				}
 

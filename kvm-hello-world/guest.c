@@ -27,16 +27,16 @@ _start(void) {
 	char *p = (char*) malloc(50*sizeof(char));
 	p = "Hello, world!\n";
 
-	outb(0xEA, (uintptr_t) p);
-	// print(p);
-	// print(p);
-	// int num_exits = exits();
-	// // num to ascii (for simplicity assume single digit)
-	// p[0] = '0'+num_exits;
-	// // set null char
-	// p[1] = '\0';
-	// // print result
-	// print(p);
+	print(p);
+	print(p);
+	int num_exits = exits();
+	// num to ascii (for simplicity assume single digit)
+	p[0] = '0'+num_exits;
+	// set null char
+	p[1] = '\n';
+	p[2] = (char)0;
+	// print result
+	print(p);
 
 	*(long *) 0x400 = 42;
 
