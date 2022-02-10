@@ -200,12 +200,17 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 	}
 }
 
+struct write_action {
+	uintptr_t buf_addr;
+	int len;
+};
+
 int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 {
 	struct kvm_regs regs;
 	uint32_t exit_count = 0;
 	uint64_t memval = 0;
-	struct kvm_translation kvm_trans;
+	FILE * f = NULL;
 
 	for (;;) {
 		if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
@@ -221,16 +226,16 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 		case KVM_EXIT_IO:
 			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
 			    && vcpu->kvm_run->io.port == 0xEA) {
+				struct kvm_translation kvm_trans;
 				char *p = (char *)vcpu->kvm_run;
-				uintptr_t mem;
-				memcpy(&mem, p + vcpu->kvm_run->io.data_offset, 1);
-				// printf("got vm address %ld\n", mem);
+				uint32_t mem;
+				memcpy(&mem, p + vcpu->kvm_run->io.data_offset, vcpu->kvm_run->io.size);
 				kvm_trans.linear_address = mem;
 				if (ioctl(vcpu->fd, KVM_TRANSLATE, &kvm_trans) < 0) {
 					perror("KVM_TRANSLATE");
 					exit(1);
 				}
-				printf("got translate address %lld\n", kvm_trans.physical_address);
+				// printf("got translate address %lld\n", kvm_trans.physical_address);
 				size_t len = 0;
 				while (vm->mem[kvm_trans.physical_address+len] != 0) {
 					++len;
@@ -246,6 +251,76 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 					p[vcpu->kvm_run->io.data_offset] = exit_count;
 					continue;
 				}
+			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
+			    && vcpu->kvm_run->io.port == 0xEC) {
+					struct kvm_translation kvm_trans;
+					char *p = (char *)vcpu->kvm_run;
+					uint32_t mem;
+					memcpy(&mem, p + vcpu->kvm_run->io.data_offset, vcpu->kvm_run->io.size);
+					// printf("got path addr: %d\n", mem);
+					kvm_trans.linear_address = mem;
+					if (ioctl(vcpu->fd, KVM_TRANSLATE, &kvm_trans) < 0) {
+						perror("KVM_TRANSLATE");
+						exit(1);
+					}
+					// printf("got translated address: %lld\n", kvm_trans.physical_address);
+					size_t len = 0;
+					while (vm->mem[kvm_trans.physical_address+len] != 0) {
+						++len;
+					}
+					// printf("len of path is: %ld\n", len);
+					
+					char * path = (char *) malloc(sizeof(char)*len);
+					memcpy(path, &vm->mem[kvm_trans.physical_address], len);
+					// printf("the path to open is: %s\n", path);
+					f = fopen(path, "w+");
+					if (f == NULL) {
+						perror("error opening file");
+					}
+					free(path);
+					continue;
+			}
+			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN
+			    && vcpu->kvm_run->io.port == 0xEC) {
+					char *p = (char *)vcpu->kvm_run;
+					if (f == NULL) {
+						p[vcpu->kvm_run->io.data_offset] = -1;
+					} else {
+						p[vcpu->kvm_run->io.data_offset] = 0;
+					}
+					continue;
+				}
+				if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
+			    && vcpu->kvm_run->io.port == 0xED) {
+						struct kvm_translation kvm_trans;
+					char *p = (char *)vcpu->kvm_run;
+					uint32_t mem;
+					memcpy(&mem, p + vcpu->kvm_run->io.data_offset, vcpu->kvm_run->io.size);
+					// printf("got path write struct: %d\n", mem);
+					kvm_trans.linear_address = mem;
+					if (ioctl(vcpu->fd, KVM_TRANSLATE, &kvm_trans) < 0) {
+						perror("KVM_TRANSLATE");
+						exit(1);
+					}
+					// printf("got translated address: %lld\n", kvm_trans.physical_address);
+					struct write_action wa = {};
+					memcpy(&wa, &vm->mem[kvm_trans.physical_address], sizeof(wa));
+					// printf("got write action. len: %d\n", wa.len);
+					kvm_trans.linear_address = wa.buf_addr;
+					if (ioctl(vcpu->fd, KVM_TRANSLATE, &kvm_trans) < 0) {
+						perror("KVM_TRANSLATE");
+						exit(1);
+					}
+					// printf("buf location after translate %lld\n", kvm_trans.physical_address);
+					fwrite(&vm->mem[kvm_trans.physical_address], sizeof(char), wa.len-1, f);
+					continue;
+			}
+			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
+			    && vcpu->kvm_run->io.port == 0xEE) {
+				fclose(f);
+				f = NULL;
+				continue;
+			}
 
 			/* fall through */
 		default:
